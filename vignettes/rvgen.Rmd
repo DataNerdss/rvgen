@@ -1,0 +1,189 @@
+---
+title: "Generating random variables with rvgen"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Generating random variables with rvgen}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>",
+                      fig.width = 6, fig.height = 3.5)
+```
+
+A computer generates only one kind of randomness well: uniform numbers
+between 0 and 1. Every other distribution has to be built from them.
+**rvgen** implements the two classical ways of doing this:
+
+1. **Inverse transform.** If $U \sim \mathrm{Unif}(0,1)$ and $F$ is a
+   continuous CDF, then $X = F^{-1}(U)$ has CDF $F$. This works when
+   $F^{-1}$ has a formula.
+2. **Acceptance-rejection.** When $F^{-1}$ has no formula, propose
+   $Y$ from an easier density $g$, and accept it with probability
+   $f(Y) / \{M g(Y)\}$, where $f(x) \le M g(x)$ for all $x$. Accepted
+   values follow $f$ exactly, and a fraction $1/M$ of proposals is accepted.
+
+```{r setup}
+library(rvgen)
+```
+
+## 1. Inverse transform: the Exponential distribution
+
+
+The Exponential($\lambda$) CDF is $F(x) = 1 - e^{-\lambda x}$. Solving
+$u = F(x)$ for $x$ gives $X = -\log(1 - U)/\lambda$, which is what
+`r_exp_inv()` computes.
+
+```{r}
+set.seed(8670)
+x <- r_exp_inv(1e5, rate = 2)
+c(sample_mean = mean(x), true_mean = 1 / 2,
+  std_error   = sd(x) / sqrt(length(x)))
+c(sample_var = var(x), true_var = 1 / 4)
+```
+
+The sample mean is less than two standard errors from the exact value
+$1/\lambda = 0.5$, and the sample variance is close to $1/\lambda^2 = 0.25$:
+both agree to within Monte Carlo error. A Kolmogorov-Smirnov test finds no
+evidence against the Exponential(2) distribution:
+
+```{r}
+suppressWarnings(ks.test(x, "pexp", rate = 2))$p.value
+```
+
+(`suppressWarnings()` hides a message about ties: `runif()` has only
+$2^{32}$ possible values, so a sample this large usually contains a
+repeated value or two.)
+
+`r_inverse()` does the same for any distribution whose quantile function you
+can supply, including one you write yourself:
+
+```{r}
+q_uniform_ab <- function(p, a, b) a + (b - a) * p   # inverse CDF of Unif(a, b)
+set.seed(1)
+r_inverse(5, q_uniform_ab, a = 10, b = 20)
+
+```
+
+## 2. Acceptance-rejection: the Beta distribution
+
+The Beta CDF has no closed-form inverse, so `r_beta_ar()` uses
+acceptance-rejection with a Uniform(0, 1) proposal. The bound $M$ is the
+height of the Beta density at its peak, and it is computed automatically.
+
+### A typical use
+
+Suppose a quantity such as a success proportion is believed to follow a
+Beta(2, 5) distribution, and we want to estimate the probability that it
+exceeds 0.5 by simulation.
+
+```{r}
+set.seed(8670)
+p <- r_beta_ar(20000, a = 2, b = 5)
+
+mean(p > 0.5)                    # simulation estimate
+1 - pbeta(0.5, 2, 5)             # exact answer
+```
+
+The estimate is close to the exact value 0.109. Its Monte Carlo standard
+error is $\sqrt{\hat p(1-\hat p)/n}$:
+
+```{r}
+p_hat <- mean(p > 0.5)
+sqrt(p_hat * (1 - p_hat) / length(p))
+```
+
+so the difference from the exact answer is within two standard errors.
+
+
+```{r, fig.alt = "Histogram of Beta(2,5) draws with the true density curve overlaid"}
+hist(p, breaks = 50, freq = FALSE, col = "grey85", border = "white",
+     main = "r_beta_ar(20000, 2, 5)", xlab = "x")
+curve(dbeta(x, 2, 5), add = TRUE, lwd = 2, col = "firebrick")
+```
+
+### Reading the diagnostics
+
+The output is an ordinary numeric vector, with diagnostics stored as
+attributes:
+
+```{r}
+attr(p, "M")                 # box height: the density's maximum
+attr(p, "acceptance_rate")   # observed share of proposals kept
+1 / attr(p, "M")             # theoretical acceptance rate
+attr(p, "n_proposed")        # total proposals generated
+```
+
+The observed acceptance rate matches $1/M$. This tells us the cost of the
+method: on average $M$ proposals are needed for each accepted draw.
+
+### Peaked targets cost more
+
+The more peaked the target, the taller the box and the smaller the
+acceptance rate. The draws remain exact; only the work increases.
+
+```{r}
+set.seed(8670)
+mild   <- r_beta_ar(10000, 2, 2)
+peaked <- r_beta_ar(10000, 8, 8)
+data.frame(
+  target          = c("Beta(2,2)", "Beta(8,8)"),
+
+  M               = c(attr(mild, "M"), attr(peaked, "M")),
+  acceptance_rate = c(attr(mild, "acceptance_rate"),
+                      attr(peaked, "acceptance_rate")),
+  sample_mean     = c(mean(mild), mean(peaked))
+)
+```
+
+## 3. Using your own target and proposal
+
+`r_accept_reject()` works with any target $f$, proposal sampler, proposal
+density $g$ and bound $M$. Here the target is the half-normal density
+$f(x) = 2\phi(x)$ for $x > 0$, and the proposal is Exponential(1), sampled
+by our own inverse-transform function. The best bound is
+$M = \sqrt{2e/\pi} \approx 1.32$.
+
+```{r}
+f <- function(x) 2 * dnorm(x)
+g <- function(x) dexp(x)
+M <- sqrt(2 * exp(1) / pi)
+
+set.seed(8670)
+z <- r_accept_reject(1e5, f, rg = function(k) r_exp_inv(k), g = g, M = M)
+c(sample_mean = mean(z), true_mean = sqrt(2 / pi),
+  std_error   = sd(z) / sqrt(length(z)))
+c(acceptance_rate = attr(z, "acceptance_rate"), theory = 1 / M)
+```
+
+The sample mean is within two standard errors of the exact half-normal mean
+$\sqrt{2/\pi}$, and the acceptance rate matches $1/M \approx 0.76$.
+
+## 4. Safety checks
+
+
+The functions stop or warn when the method cannot work:
+
+```{r, error = TRUE}
+r_beta_ar(10, a = 0.5, b = 2)   # density unbounded: no finite M exists
+r_exp_inv(10, rate = -1)        # invalid parameter
+```
+
+If $M$ is too small, the box does not cover the target and the draws are
+wrong. The sampler detects this and warns:
+
+```{r}
+set.seed(1)
+bad <- r_accept_reject(1000, function(x) dbeta(x, 8, 8), runif,
+                       function(x) rep(1, length(x)), M = 1.5)
+attr(bad, "max_ratio")          # above 1 means f > M * g somewhere
+```
+
+## Summary
+
+- Use the **inverse transform** (`r_exp_inv()`, `r_weibull_inv()`,
+  `r_inverse()`) when the inverse CDF has a formula: one uniform gives one draw.
+- Use **acceptance-rejection** (`r_beta_ar()`, `r_accept_reject()`) when it
+  does not: the draws are still exact, but about $M$ proposals are needed per
+  draw, so a proposal close in shape to the target keeps $M$ small.

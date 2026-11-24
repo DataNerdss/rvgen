@@ -1,0 +1,22 @@
+Package: rvgen
+Title: Random Variable Generation by Inverse Transform and Acceptance-Rejection
+Version: 1.0.0
+Authors@R: c(
+    person(c("Moses", "Kwame"), "Hovor", role = c("aut", "cre"), email = "mkhovor@gmail.com"),
+    person("Juliet", "Seadey", role = "aut"))
+Description: Implements two classical methods for generating random variables
+    from uniform random numbers: the inverse-transform method and the
+    acceptance-rejection method. Written for the STAT 8670 Computational
+    Methods in Statistics course project.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+Depends: R (>= 4.0.0)
+Imports: stats
+Config/roxygen2/version: 8.1.1
+Suggests: 
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+VignetteBuilder: knitr
