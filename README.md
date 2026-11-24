@@ -33,7 +33,7 @@ From GitHub:
 
 ```r
 # install.packages("remotes")
-remotes::install_github("[github-username]/rvgen", build_vignettes = TRUE)
+remotes::install_github("DataNerdss/rvgen", build_vignettes = TRUE)
 ```
 
 From a local copy of this repository, in R, with the working directory set
